@@ -1,9 +1,9 @@
-# typingstat
-A tool to display your system wide typing statistics in real-time.
+# Typingstat
+A tool to display your system-wide typing statistics in real-time. It can be open beside a document for you to get information about how you type. It does *not* depend on you typing inside the program, it receives the data from your device.
 
 ![Screenshot](typingstat-screenshot.png)
 
-* Only *NIX support at the moment
+* Only supports *NIX at the moment!
 
 
 ## Installation
@@ -37,7 +37,7 @@ This tool was made to fit the `swedish` QWERTY-keyboard. In order to get correct
 
 ### Auto-run
 
-Edit: `setup.ini` to your needs if you prefer to start the program without sending flags.
+If you wan't to, edit: `setup.ini` to your needs if you prefer to start the program without sending flags.
 
 
 ## Usage
