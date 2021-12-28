@@ -1,5 +1,0 @@
-running = True
-
-setup = {}
-
-typing = {}

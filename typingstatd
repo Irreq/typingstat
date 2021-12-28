@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# File name: typingstat/typingstatd
+# Description: Daemon who handles events and logic as server
+# Author: irreq (irreq@protonmail.com)
+# Date: 27/12/2021
+
+import struct
+import os
+import sys
+import logging
+import time
+import signal
+import socket
+
+config_path = "/etc/typingstat/config.py"
+
+if os.geteuid() != 0:
+    print("You need root access to run %s.\nAbborting..." % sys.argv[0])
+    sys.exit()
+
+log_path = "/var/log/typingstat/log.txt"
+
+if not os.path.exists(log_path):
+    try:
+        os.makedirs(os.path.dirname(log_path))
+    except OSError as exc: # Guard against race condition
+        if exc.errno != errno.EEXIST:
+            raise
+
+# Initiate logfile
+logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG)
+
+
+class GracefulKiller:
+    kill_now = False
+    def __init__(self):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self, *args):
+        self.kill_now = True
+
+
+class Keylogger(GracefulKiller):
+    def __init__(self, event, layout, callback):
+        self.event = event
+        self.layout = layout
+        self.callback = callback
+
+        self.input_file = None
+
+        """
+        FORMAT represents the format used by linux kernel input event struct see:
+        https://github.com/torvalds/linux/blob/v5.5-rc5/include/uapi/linux/input.h#L28
+        Stands for: long int, long int, unsigned short, unsigned short, unsigned int
+        """
+        self.FORMAT = 'llHHI'
+        self.previous = 1
+
+        super().__init__()
+
+    def read_event(self):
+        data = self.input_file.read(struct.calcsize(self.FORMAT))
+        seconds, microseconds, type, code, value = struct.unpack(self.FORMAT, data)
+        return seconds + microseconds / 1e6, type, code, value
+
+    def start(self):
+        with open(self.event, "rb") as self.input_file:
+            while not self.kill_now:
+                seconds, type, code, value = self.read_event()
+                if value != 1:
+                    continue
+
+                # If key has been held down
+                if code == 0:
+                    code = self.previous
+                else:
+                    self.previous = code
+
+                try:
+                    key = self.layout[code]
+                except:
+                    key = "Unknown"
+
+                self.callback(key, code, seconds)
+            self.input_file.close()
+
+
+class Typingstatd(Keylogger):
+
+    def __init__(self):
+        self.config = None
+        self.load_config()
+
+        # Open socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # To prevent ZeroDivisionError
+        self.sigma = 1e-5
+        self.log = []
+
+        self.flush()
+
+        super().__init__(self.config.event, self.config.keyboard_layout, self.run)
+
+    def broadcast(self, data):
+        """The goal for this function can be described by "Mr. Boy" stackoverflow
+        question:
+        (https://stackoverflow.com/questions/64749467/is-there-a-standard-ipc-technique-similar-to-named-pipes-without-the-requiremen)
+
+        "[...] be able to open a pipe and push data down it, without knowing/caring
+        if there is a client. If there's no client, the data just gets discarded.
+        Perhaps more a 'sink' than a pipe is a better way to describe this? The
+        server doesn't handle connection attempts it just "throws the data" for
+        anyone who happens to listen."
+
+        This program utilizes: User Datagram Protocol (UDP) as a way to "broadcast"
+        data to anyone or no one who is listening."""
+
+        encoded = data.encode("utf8")
+        self.sock.sendto(encoded, (self.config.udp_ip, self.config.udp_port))
+
+    def stop(self):
+        self.kill_now = True
+
+    def log(self, text):
+        self.log.append((text, time.time()))
+
+    def flush(self):
+        self.last_broadcast = time.time()
+        self.log = []
+        self.strokes = 0
+        self.key_previous = ""
+        # Longest time to type a word
+        self.delay = 5
+
+        # Key
+        self.key = ""
+        self.key_kps = 0
+        self.key_seconds = 0
+        self.key_code = 0
+        self.key_abc_count = 0
+        self.key_query = [time.time()]
+        self.key_query_total = []
+
+        # Word
+        self.word_buffer = ""
+        self.word_time = [time.time()]
+        self.word_count = 0
+        self.word_n_temporal = 5
+        self.word_wpm = 0
+
+        # Error estimation
+        self.error_count = []
+        self.error_ratio = 0
+        self.error_percentage = 0
+
+    def load_config(self):
+        if not os.path.exists(config_path):
+            logging.debug("Configuration file could not be found.")
+            sys.exit()
+
+        # Import the config file
+        sys.path.append(config_path[:-len("/config.py")])
+        import importlib
+        try:
+            self.config = importlib.reload(self.config)
+        except ModuleNotFoundError:
+            logging.debug("Configuration module could not be found.")
+            sys.exit()
+        except TypeError:
+            self.config = importlib.import_module("config")
+
+        # Naive way of retrieving kbd file
+        if self.config.event is None:
+            events = []
+            for ev in os.listdir("/dev/input/by-path/"):
+                if "-kbd" in ev:
+                    events.append("/dev/input/by-path/" + ev)
+            if len(events) == 0:
+                logging.debug("No keyboards present.")
+                sys.exit()
+
+            self.config.event = events[0]
+
+    def calculate_kps(self):
+        # Reset if keypress is a certain amount of time away
+        if self.key_seconds - self.key_query[-1] > self.delay:
+            self.key_query = [self.key_seconds]
+        else:
+            self.key_query.append(self.key_seconds)
+            self.key_query = self.key_query[-self.word_n_temporal:]
+
+            kps = int(1 / ((self.key_query[-1] - self.key_query[0] + self.sigma) / self.word_n_temporal))
+            self.key_query_total.append(kps)
+
+            # Shorten the list
+            self.key_query_total = self.key_query_total[-self.word_n_temporal:]
+            self.key_kps = sum(self.key_query_total) // len(self.key_query_total)
+
+    def estimate_error(self):
+
+        self.error_count = self.error_count[-self.word_n_temporal*20:]
+        # Homebrew algorithm to estimate error
+        mean = sum(self.error_count) / len(self.error_count)
+        self.error_percentage = int(100 * mean)
+
+    def run(self, key, code, seconds):
+
+        self.key = key
+        self.key_code = code
+        self.key_seconds = seconds
+
+        # Calculate when words 'ends' to estimate WPM
+        if self.key in ["Space", "Enter", "Esc"]:
+            if self.word_buffer != "":
+                self.word_count += len(self.word_buffer)
+
+                # Check this as it might be redundant (no need for if statement)
+                if len(self.word_time) > 0:
+                    # Flush the 'old' words to estimate a temporal typing speed
+                    self.word_time = self.word_time[-self.word_n_temporal:]
+
+                    # Only add wpm if words takes less than 'config.setup['delay']'
+                    # seconds to type. Therefore, the slowest you can type is
+                    # 60 / 'self.config.setup['delay']' WPM, but change this value if you
+                    # feel like you need more time to type.
+
+                    if self.key_seconds-self.word_time[-1] < self.delay:
+                        self.word_time.append(self.key_seconds)
+                        self.word_wpm = int(60 * len(self.word_time) / (self.word_time[-1] - self.word_time[0]))
+                    else:
+                        self.word_time = [self.key_seconds]
+                else:
+                    self.word_time.append(self.key_seconds)
+
+            self.word_buffer = ""
+
+
+        # Determine if its a word
+        elif self.key in self.config.alphabet:
+            self.error_count.append(0)
+            # To only recognize "real words"
+            if self.key_previous in self.config.alphabet+" SpaceEnterBkSpcDelete":
+                self.key_abc_count += 1
+                self.estimate_error()
+                # will not count holding down on keyboard as a word
+                if self.key*3 != self.word_buffer[-3:]:
+                    self.word_buffer += self.key
+
+        # Estimate error
+        elif self.key in ["Delete", "BkSpc"]:
+            self.error_count.append(1)
+            self.estimate_error()
+
+        self.calculate_kps()
+        self.strokes += 1
+        self.key_previous = self.key
+
+        if seconds - self.last_broadcast >= 1:
+            to_send = [self.key_kps,
+                       self.word_wpm,
+                       self.error_percentage,
+                       self.strokes,
+                       ]
+            data = ",".join([str(i) for i in to_send])
+            self.broadcast(data)
+            self.last_broadcast = seconds
+
+
+main = Typingstatd()
+
+# Check current program status
+if os.path.isfile(main.config.pidfile):
+    print("%s instance already exists, exiting" % main.config.pidfile)
+    sys.exit()
+
+# Create and write PID to config.pidfile
+with open(main.config.pidfile, "w") as file:
+    pid = str(os.getpid())
+    file.write(pid)
+    file.close()
+
+try:
+    main.start()
+except Exception as e:
+    logging.debug(str(e))
+    main.kill_now = True
+finally:
+    os.unlink(main.config.pidfile)
