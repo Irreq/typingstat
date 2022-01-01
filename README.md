@@ -43,6 +43,12 @@ Install the program and daemon:
 sudo ./install.sh
 ```
 
+Install the Python package:
+
+```
+sudo python3 setup.py install
+```
+
 
 ## Setup
 
