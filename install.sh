@@ -12,7 +12,12 @@ fi
 printf "Type 'yes' to continue installation " >&2
 read -r option
 
-if []
+echo $option
+
+if test "$option" != "yes"; then
+  echo "You need to be certain with what you are doing. Abborting..."
+  exit 0
+fi
 
 # The path where the main project reside
 home_user_path=${PWD%/*/*}
@@ -40,6 +45,12 @@ FILE=/etc/typingstat/config.py
 if ! [ -f "$FILE" ]; then
     echo "Linking daemon config file: " /etc/typingstat/config.py " from " $home_user_path/.config/typingstat/config.py
     ln $home_user_path/.config/typingstat/config.py /etc/typingstat/config.py
+fi
+
+FILE=/usr/bin/typingstatd
+if ! [ -f "$FILE" ]; then
+    echo "Copying daemon file: 'typingstatd' to " $FILE
+    cp typingstatd $FILE
 fi
 
 cat NOTICE

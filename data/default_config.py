@@ -160,9 +160,7 @@ keyboard_layout = {
 # The program will if event is 'None' try to find a keyboard on its own. It
 # might be a problem if multiple keybaords are presents as there is no logic
 # behind which keyboard will be chosen.
-# event = None
-# event = "/dev/input/by-id/usb-Dell_Dell_USB_Keyboard-event-kbd"
-event = "/dev/input/by-id/usb-CHICONY_Compaq_USB_Keyboard-event-kbd"
+event = None
 language = "sv"
 
 # Keys when tapped will count as 'typing a word' for WPM estimation. Change this

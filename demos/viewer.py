@@ -17,7 +17,7 @@ def format_output(result):
 
     formatted = "WPM: %-3s " % result["wpm"]
     formatted += "KPS: %-3s " % result["kps"]
-    formatted += "Error: %%-3s " % result["error"]
+    formatted += "Error: %-3s " % result["error"]
     formatted += "Strokes: %d " % result["strokes"]
 
     return formatted
@@ -42,5 +42,7 @@ while not ts.kill_now:
         if result != ts.previous_poll:
             formatted = format_output(result)
             print(formatted, end="\r")
+            continue
+    print("Error                                                               ", end="\r")
 
 print("\n\nTypingstat v%s - https://www.github.com/Irreq/typingstat\n\nBye!" % (__version__))

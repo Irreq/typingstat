@@ -36,6 +36,7 @@ setuptools.setup(
     author_email=_get("__email__"),
     url="http://github.com/Irreq/typingstat",
     python_requires=">=3.4",
+    zip_safe=False,
     classifiers=[
         "Development Status :: %s" % _get("__status__"),
         "Environment :: Console",
