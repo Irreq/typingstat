@@ -1,5 +1,7 @@
 # Typingstat
-A python module to measure your typing as you type. The information about your typing can be accessed by a another python module or displayed by `demos/viewer.py` in real-time*.
+This repository contains two parts, a simple C typingstat program (main) that
+tries to compute your WPM and relative error as you type. The repository also
+contains a python module (legacy) to measure your typing as you type. The information about your typing can be accessed by a another python module or displayed by `demos/viewer.py` in real-time*.
 
 \* (Close to real time, as it buffers the data)
 
