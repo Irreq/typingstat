@@ -119,15 +119,17 @@ void loop() {
   int characterCount = 0;
   time_t previous_time = time(NULL) - SECONDS_PER_HOUR + 1;
 
-  fd = open(
-      path,
-      O_RDONLY); // Replace X with the appropriate event number for the keyboard
+  fd = open(path,
+            O_RDONLY | O_NONBLOCK); // Replace X with the appropriate event
+                                    // number for the keyboard
 
   if (fd == -1) {
     perror("Cannot open input device");
     printf("\nAre your root?\n");
     return;
   }
+
+  printf("Refresh rate: %ds\n\n", INTERVAL);
 
   printf("\rPress any key to continue");
   fflush(stdout);
@@ -147,10 +149,31 @@ void loop() {
       printf("Keyboard does not exist anymore. Exiting.\n");
       break;
     }
-    ssize_t status = read(fd, &ev, sizeof(struct input_event));
 
-    if (status == -1) {
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(fd, &set);
+
+    struct timeval timeout;
+    timeout.tv_sec = INTERVAL * 2;
+    timeout.tv_usec = 0;
+
+    // Use select() to wait for data with timeout
+    int ready = select(fd + 1, &set, NULL, NULL, &timeout);
+
+    if (ready == -1) {
+      perror("Error in select");
       break;
+    } else if (ready == 0) {
+      mode = 0;
+      goto skip;
+
+    } else {
+      ssize_t status = read(fd, &ev, sizeof(struct input_event));
+
+      if (status == -1) {
+        break;
+      }
     }
 
     if (ev.type == EV_KEY && (ev.value == 1 || ev.value == 0)) {
@@ -165,26 +188,24 @@ void loop() {
         break;
       default:
         if (isCharacter(ev.code)) {
-          characterCount++;
+          characterCount++; // This code is dangerous since ev.code contains
+                            // typed character (keylogger)
         }
-        // printf("Other: %d\n", ev.code);
+
         break;
       }
 
       i++;
-      // if (ev.code == BACKSPACE_KEY || ev.code ==)
       time_t current_time = time(NULL);
       double elapsed_seconds = difftime(current_time, previous_time);
       if (elapsed_seconds >= INTERVAL) {
 
         if (elapsed_seconds >= INTERVAL * 2) {
-          // printf("Inactive\n");
           mode = 0;
           goto skip;
         }
 
         if ((double)i / elapsed_seconds < 0.5) {
-          // printf("Skipping\n");
           mode = 1;
           goto skip;
         }
@@ -197,37 +218,63 @@ void loop() {
 
         error =
             estimateFrequency(error, 100.0 * errorCount / (double)i, 1.0, 0.3);
-        // printf("\rRate: %.2fWPM Error: %.1f%%                 ",
-        //        wpm * TO_MINUTE, error * 100.0);
-        // fflush(stdout);
+
         wpm = wps * 60.0 * (1.0 - error / 100.0) * INFLATION;
         accuracy = 100.0 - error;
 
-        // If an hour has passed, reset counts and start_time
-        // printf("Backspace keys per hour: %d\n", errorCount);
-        // printf("Delete keys per hour: %d\n", errorCount);
       skip:
         errorCount = 0;
         wordCount = 0;
         characterCount = 0;
         previous_time = current_time;
         i = 0;
+      print:
 
         printf("\r Rate: %.2fWPM Accuracy: %.1f%%  (%s)   "
                "        ",
                wpm, accuracy, modes[mode]);
         fflush(stdout);
+      } else {
+        if (mode != 2) {
+          mode = 2;
+          goto print;
+        }
       }
     }
   }
-  printf("Closing\n");
+  printf("Closing\n\n");
+  printf("Thank you for using typingstat!\n");
   close(fd);
 }
+
+const char *eula =
+    "\n                         [EULA]\n\n"
+    "This software contains a keylogger and is for educational purposes only.\n"
+    "It counts keystrokes and does not store characters directly. By using \n"
+    "this software, you agree that the developer takes ZERO legal \n"
+    "responsibility for its use. It is your responsibility to use this \n"
+    "software ethically and in compliance with applicable laws. Be aware of \n"
+    "potential hazards and obtain necessary permissions before monitoring \n"
+    "keystrokes. Have fun!\n\n";
 
 int main() {
   signal(SIGINT, sigint_handler); // Set up SIGINT signal handler
 
-  printf("List of available keyboards:\n");
+  printf("%s", eula);
+  char input[50]; // Assuming input won't exceed 49 characters
+
+  printf("Type 'logger' to proceed: ");
+  fgets(input, sizeof(input), stdin);
+
+  // Remove newline character if present
+  input[strcspn(input, "\n")] = '\0';
+
+  // Compare the user input with the desired string
+  if (strcmp(input, "logger") != 0) {
+    perror("You must accept the notice.\n");
+    exit(EXIT_FAILURE);
+  }
+  printf("\n\nList of available keyboards:\n");
   getKBDFile();
 
   loop();
