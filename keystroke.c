@@ -18,7 +18,6 @@
 #define SPACE_KEY 57
 #define ENTER_KEY 28
 
-#define SECONDS_PER_HOUR 5 // Number of seconds in an hour
 #define INTERVAL 10
 #define TO_MINUTE 60.0 / INTERVAL
 #define INFLATION 0.9
@@ -119,9 +118,7 @@ void loop() {
   int characterCount = 0;
   time_t previous_time = time(NULL) - SECONDS_PER_HOUR + 1;
 
-  fd = open(path,
-            O_RDONLY | O_NONBLOCK); // Replace X with the appropriate event
-                                    // number for the keyboard
+  fd = open(path, O_RDONLY | O_NONBLOCK);
 
   if (fd == -1) {
     perror("Cannot open input device");
