@@ -116,7 +116,7 @@ void loop() {
   int errorCount = 0;
   int wordCount = 0;
   int characterCount = 0;
-  time_t previous_time = time(NULL) - SECONDS_PER_HOUR + 1;
+  time_t previous_time = time(NULL) - INTERVAL + 1;
 
   fd = open(path, O_RDONLY | O_NONBLOCK);
 
@@ -208,6 +208,8 @@ void loop() {
         }
 
         mode = 2;
+
+        // TODO lots of magic numbers here
         double wc_prime = ((double)wordCount +
                            ((double)characterCount / (double)AVG_WORD_LENGTH)) /
                           2;
