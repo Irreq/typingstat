@@ -143,7 +143,15 @@ void loop() {
   char *modes[3] = {"Inactive", "Working", "Typing"};
   int mode = 0;
   while (!flag) {
-    read(fd, &ev, sizeof(struct input_event));
+    if (access(path, F_OK) == -1) {
+      printf("Keyboard does not exist anymore. Exiting.\n");
+      break;
+    }
+    ssize_t status = read(fd, &ev, sizeof(struct input_event));
+
+    if (status == -1) {
+      break;
+    }
 
     if (ev.type == EV_KEY && (ev.value == 1 || ev.value == 0)) {
       switch (ev.code) {
